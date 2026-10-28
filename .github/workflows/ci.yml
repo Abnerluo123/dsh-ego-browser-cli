@@ -24,6 +24,8 @@ jobs:
         run: node test/mount.test.mjs
       - name: Gate suite (browser surface free, host access prompts, comments ignored)
         run: node test/gate.test.mjs
+      - name: Space suite (one space per session, explicit targeting wins)
+        run: node test/space.test.mjs
       - name: Package metadata sanity
         run: |
           node --input-type=module -e '

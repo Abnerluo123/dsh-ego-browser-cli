@@ -114,12 +114,12 @@ const info = await page.evaluate(() => ({
 console.log(JSON.stringify(info));
 ```
 
-参数：`spaceId` 用于续接任务空间，`timeoutMs` 用于限制单次运行时长。
+参数：`spaceId` 用于指定某个任务空间，`spaceName` 用于刻意分离的另一个目标，`timeoutMs` 用于限制单次运行时长。
 
 ### 需要知道的几点
 
 - **ego 把脚本的 `console.log` 输出打到 STDERR，不是 stdout。** 两路都会返回，stderr 不代表失败。
-- **每次调用都是新进程。** 任务空间按名称/id 持久，但 JavaScript 变量不持久。打印 `task.spaceId` 并作为 `spaceId` 传回来即可续接。
+- **每次调用都是新进程，但任务空间不是。** 插件把空间名绑定到会话，所以连续调用会自动续接同一个空间——你不用手工打印并回传 `spaceId`。只有 JavaScript 变量会重置。
 - **尽量用一个脚本跑完整流程。** 中间状态不会进入模型上下文，所以批量执行比多次小调用便宜得多。
 - **不要调用无参数的 `task.finish()` 或空的 `keep`**——两者都会抛错。要么完全不调用（进程退出时释放空间），要么 `task.finish({ keep: "all" })`。
 

@@ -321,6 +321,48 @@ function runEgo(command, script, options) {
   })
 }
 
+/**
+ * Stable task-space name for one DSH session.
+ *
+ * The official ego guide asks for exactly one TaskSpace per user goal, and
+ * `taskSpace(name)` resumes an existing space with that name instead of
+ * creating another. A timestamped name defeats that mechanism: every call mints
+ * a new space and leaves the previous one behind. Keying the name on the
+ * session makes repeated calls land in the same space automatically, which is
+ * what the guide asks for.
+ *
+ * Exported for the space suite; not part of the plugin contract.
+ *
+ * @param exec - the tool execution, carrying the calling agent's session.
+ * @returns a name that is stable for the life of the session.
+ */
+export function defaultSpaceName(exec) {
+  const sessionId = exec?.agent?.session?.id
+  if (typeof sessionId === 'string' && sessionId.length > 0) return `dsh-ego-${sessionId}`
+  // Agentless call: stay stable for this harness process rather than minting a
+  // fresh space on every invocation.
+  return `dsh-ego-pid-${process.pid}`
+}
+
+/**
+ * Build the script prelude that selects the task space.
+ *
+ * Precedence: an explicit `spaceId` resumes by id, then an explicit
+ * `spaceName` resumes or creates by name, then the session-stable default.
+ * Every branch resolves to the official `taskSpace(...)` call, so the guide's
+ * "one space per goal" rule holds without the caller tracking it by hand.
+ *
+ * @param args - validated tool arguments.
+ * @param exec - the tool execution.
+ * @returns the `const task = ...` line plus a trailing newline.
+ */
+export function spacePreamble(args, exec) {
+  if (args.spaceId !== undefined) return `const task = await taskSpace(${Number(args.spaceId)});\n`
+  const explicit = typeof args.spaceName === 'string' ? args.spaceName.trim() : ''
+  const name = explicit.length > 0 ? explicit : defaultSpaceName(exec)
+  return `const task = await taskSpace(${JSON.stringify(name)});\n`
+}
+
 /** Standard JSON Schema for the tool's arguments (raw register: no author-spec `required:true`). */
 const PARAMETERS = {
   type: 'object',
@@ -337,7 +379,12 @@ const PARAMETERS = {
     spaceId: {
       type: 'integer',
       description:
-        'Reuse an existing ego task space. Omit to start a fresh one. Task spaces persist across calls, but JavaScript variables do not — every call is a new process.',
+        'Resume one specific ego task space by numeric id. Omit it to stay in this session\'s space: the plugin reuses one space per DSH session automatically, so repeated calls continue where the last one stopped. Task spaces persist across calls, but JavaScript variables do not — every call is a new process.',
+    },
+    spaceName: {
+      type: 'string',
+      description:
+        'Resume or create a task space by name, for a deliberately separate goal (the official guide allows more than one space only when the user asks). Ignored when spaceId is set.',
     },
     timeoutMs: {
       type: 'integer',
@@ -415,7 +462,7 @@ export function apply(ctx, config) {
       'Contract:',
       '- `task` and the default `page` ("p1") are already in scope; top-level await is allowed.',
       '- ego prints script `console.log` output on STDERR. Both streams are returned; do not read stderr as failure.',
-      '- Each call is a new process and new variables; a named task space persists across calls — print `task.spaceId` and pass it back as `spaceId` to continue.',
+      '- Each call is a new process and new variables. The task space persists: omitting `spaceId` and `spaceName` resumes this session\'s own space, so the next call continues where the last one stopped. Pass `spaceId` to target a specific space, or `spaceName` for a deliberately separate goal.',
       '- Prefer ONE script that finishes the whole flow over many round trips: it costs far fewer tokens.',
       '- Scripts touching raw fs / child_process / sockets / eval trigger a one-shot approval prompt.',
       '- Read the bundled ego-browser skill before non-trivial work; it documents the exact API.',
@@ -441,10 +488,9 @@ export function apply(ctx, config) {
         throw new Error('invalid description: expected a non-empty string')
       }
 
-      // A caller-supplied spaceId resumes that space instead of creating one.
-      const preamble = args.spaceId === undefined
-        ? 'const task = await taskSpace("dsh-ego-" + Date.now());\n'
-        : `const task = await taskSpace(${Number(args.spaceId)});\n`
+      // Resolve the task space: explicit id, then explicit name, then the
+      // session-stable default (which auto-resumes, per the official guide).
+      const preamble = spacePreamble(args, exec)
 
       const script = `${preamble}const page = task.page("p1");\n${args.script}\n`
 

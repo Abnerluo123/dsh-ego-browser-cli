@@ -27,8 +27,14 @@ below are the parts specific to calling it through this tool.
   `task` and a default `page` (`"p1"`) are already in scope; top-level `await`
   works.
 - `description` (required) — a short imperative label for the tool card.
-- `spaceId` — resume an existing task space instead of creating a new one.
+- `spaceId` — resume one specific task space by numeric id.
+- `spaceName` — resume or create a space by name, for a deliberately separate
+  goal. Ignored when `spaceId` is set.
 - `timeoutMs` — wall-clock ceiling; defaults to 240000.
+
+Omit both `spaceId` and `spaceName` and the plugin stays in **this session's own
+space**: it keys the space name on the session, so consecutive calls resume the
+same space automatically. You do not have to print and thread `spaceId` by hand.
 
 ```js
 await page.goto("https://example.com");
@@ -48,8 +54,12 @@ console.log(JSON.stringify({ title: await page.title(), url: await page.url() })
 - **Prefer one script that finishes the whole flow.** Each call is a new process;
   intermediate state never enters the model's context. Ten small calls cost far
   more tokens than one script that does all ten steps and prints one result.
-- **`task` and JavaScript variables do not survive between calls.** Print
-  `task.spaceId` and pass it back as `spaceId` to continue in the same space.
+- **`task` and JavaScript variables do not survive between calls.** The task
+  space does: the next call without `spaceId` resumes the same space, so Page
+  labels such as `"p1"` keep working. Only JavaScript variables reset.
+- **Use one space per goal.** That is now the default. Reach for `spaceName` only
+  when the user asks for a separate, parallel piece of work — the official guide
+  allows extra spaces only on explicit request.
 - **Do not call `task.finish()` with no argument or with an empty `keep`** — both
   throw (`keep must be "all" or an array of unique non-empty Page labels`).
   Either omit `finish` entirely (the space is released when the process exits) or

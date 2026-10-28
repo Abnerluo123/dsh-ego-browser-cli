@@ -125,14 +125,16 @@ const info = await page.evaluate(() => ({
 console.log(JSON.stringify(info));
 ```
 
-Options: `spaceId` to resume a task space, `timeoutMs` to cap the run.
+Options: `spaceId` to target a specific task space, `spaceName` for a deliberately separate
+goal, `timeoutMs` to cap the run.
 
 ### Things worth knowing
 
 - **Ego prints script `console.log` output on STDERR, not stdout.** Both streams come back;
   stderr is not failure.
-- **Each call is a new process.** Task spaces persist by name/id; JavaScript variables do
-  not. Print `task.spaceId` and pass it back as `spaceId` to continue.
+- **Each call is a new process; the task space is not.** The plugin keys the space name on
+  the session, so consecutive calls resume the same space automatically — you do not have to
+  print and thread `spaceId` by hand. Only JavaScript variables reset between calls.
 - **Prefer one script that finishes the whole flow.** Intermediate state never enters the
   model's context, so batching is dramatically cheaper than many small calls.
 - **Do not call `task.finish()` with no argument or an empty `keep`** — both throw. Omit

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.2 — 2026-10-28
+
+One task space per session, as the official guide intends.
+
+- **Fixed a space leak.** The plugin named every space `dsh-ego-<timestamp>`, so
+  each call created a new space and left the previous one behind — the cause of
+  the stray windows. The name is now derived from the calling session, so
+  `taskSpace(name)` resumes the existing space and repeated calls continue in
+  place. This is the official mechanism; the timestamp was defeating it.
+- **New `spaceName` argument** for a deliberately separate goal, matching the
+  guide's "multiple spaces only when the user asks". `spaceId` still wins, and a
+  supplied name is JSON-escaped so quotes cannot escape the string literal.
+- New `test/space.test.mjs`: 16 checks over name stability, targeting
+  precedence, whitespace handling, agentless calls, and name escaping.
+
 ## 1.0.1 — 2026-10-28
 
 Gate correctness. The approval check now means "leaves the official browser
