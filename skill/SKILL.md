@@ -71,16 +71,31 @@ console.log(JSON.stringify({ title: await page.title(), url: await page.url() })
 
 ## Approval behaviour
 
-Browser automation runs **without** prompting. A script that reaches host-level
-primitives raises **one** approval request for that call:
+**The official browser surface is free.** Anything from the ego skill — `task`,
+`page` and its methods, `console`, ordinary JavaScript — runs with no prompt.
+That is the whole point of this plugin, so write ordinary automation normally.
 
-- raw filesystem (`node:fs`, `fs/promises`)
+`node:path` is also free: it is pure string computation and never touches the
+filesystem.
+
+A script that reaches **outside** the browser raises **one** approval request for
+that call:
+
+- the filesystem (`node:fs`, `fs/promises`)
 - subprocess spawning (`node:child_process`)
 - raw sockets or workers (`node:net`, `node:tls`, `node:dgram`, `node:http`,
   `node:https`, `node:worker_threads`)
 - host OS or VM access (`node:os`, `node:vm`)
-- process control (`process.exit`, `process.kill`, …) and dynamic evaluation
-  (`eval`, `new Function`)
+- the process environment or control (`process.env`, `process.exit`,
+  `process.kill`, …) and dynamic evaluation (`eval`, `new Function`)
+
+Comments are ignored when the script is scanned, so documenting a module in a
+comment (`// uses node:fs`) does not trigger a prompt.
+
+If a task genuinely needs both browser work and host access, prefer splitting it:
+let one call drive the browser and save its artifact, then use the ordinary
+`pwsh`/file tools for the host side, where the normal sandbox and escalation
+apply. Save host-level imports for scripts that truly cannot be split.
 
 This gate is a consent mechanism, not a containment boundary: `ego-browser
 nodejs` runs real Node with host permissions by design. A determined script can

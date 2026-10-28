@@ -153,12 +153,25 @@ only and works fine even under confinement.
 
 ## Security
 
-The approval gate is a **consent mechanism, not a containment boundary**.
+**The official browser surface is free.** Everything the ego skill documents — `task`, `page`
+and its methods, `console`, ordinary JavaScript — runs with no prompt. `node:path` is free
+too: it is pure string computation with no filesystem access.
+
+A script that reaches outside the browser gets **one** approval prompt for that call: the
+filesystem, subprocess spawning, raw sockets, host OS/VM access, the process environment, or
+dynamic evaluation. Comments are ignored during the scan, so documenting a module
+(`// uses node:fs`) does not prompt.
+
+When a task needs both browser work and host access, prefer splitting it: one call drives the
+browser and saves its artifact, then the ordinary `pwsh`/file tools handle the host side,
+where the normal sandbox and escalation apply.
+
+The gate is a **consent mechanism, not a containment boundary**.
 
 `ego-browser nodejs` runs real Node.js with host permissions by design — the official skill
-says so explicitly. The gate scans the script text for host-level primitives so you see the
-risky calls, but a determined or obfuscated script can evade a text scan. Treat the prompt
-as a signal, not a guarantee.
+says so explicitly. The gate scans the script text so you see the risky calls, but a
+determined or obfuscated script can evade a text scan. Treat the prompt as a signal, not a
+guarantee.
 
 This is inherent to the approach, not a defect in the implementation: any route that gives
 the browser full capability gives the script that drives it the same reach. If you need real

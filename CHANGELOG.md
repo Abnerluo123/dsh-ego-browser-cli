@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.1 — 2026-10-28
+
+Gate correctness. The approval check now means "leaves the official browser
+surface", not "matches a suspicious string".
+
+- **Comments no longer trigger a prompt.** The scanner drops comments before
+  matching, so a script that documents a module (`// uses node:fs`) runs free.
+  Strings and template literals are preserved, because module specifiers live
+  inside them, and a URL like `https://…` is never mistaken for a comment.
+- **`process.env` is now detected.** It previously went unflagged, so a script
+  could read credentials out of the environment with no consent prompt.
+- **Prompts name the primitive** (`node:fs`, `node:child_process`, …) instead of
+  a vague category, so the decision is easier to make.
+- **`node:path` is explicitly free** — pure computation, no filesystem access.
+- New suite `test/gate.test.mjs`: 34 checks covering the browser surface, real
+  host access, the comment false-positive class, and the "stripping must not
+  hide real code" cases (import after a URL string, inside a template
+  expression, or after an escaped quote).
+
 ## 1.0.0 — 2026-10-28
 
 Initial release.

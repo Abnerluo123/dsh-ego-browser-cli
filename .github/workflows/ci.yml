@@ -22,6 +22,8 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - name: Mount suite (registration, gate, render, arg validation)
         run: node test/mount.test.mjs
+      - name: Gate suite (browser surface free, host access prompts, comments ignored)
+        run: node test/gate.test.mjs
       - name: Package metadata sanity
         run: |
           node --input-type=module -e '

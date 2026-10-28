@@ -51,18 +51,87 @@ const DEFAULT_TIMEOUT_MS = 240_000
 const MAX_OUTPUT_CHARS = 120_000
 
 /**
- * Host-level primitives that leave the browser and touch the machine.
- * Each pattern is anchored to a module-specifier position or a process/eval
- * call so ordinary page code (`page.goto('https://…')`) never matches.
+ * Remove comments from JavaScript source while keeping string and template
+ * literals byte-for-byte.
+ *
+ * Module specifiers live *inside* strings (`import('node:fs')`), so strings must
+ * survive the scan — only comments are dropped. That removes the realistic
+ * false-positive class (a comment like `// uses node:fs`) without weakening
+ * detection of real imports.
+ *
+ * This is a pragmatic scanner, not a parser: a regular-expression literal that
+ * contains `//` can be misread as a comment. The gate is a consent signal, not a
+ * containment boundary, so that limit is documented rather than papered over.
+ *
+ * @param code - the raw script text.
+ * @returns the same script with comments replaced by whitespace.
  */
-const HOST_PRIMITIVE_PATTERNS = [
+function stripComments(code) {
+  let out = ''
+  let i = 0
+  const n = code.length
+
+  while (i < n) {
+    const ch = code[i]
+    const next = code[i + 1]
+
+    // Line comment.
+    if (ch === '/' && next === '/') {
+      while (i < n && code[i] !== '\n') i += 1
+      continue
+    }
+    // Block comment.
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < n && !(code[i] === '*' && code[i + 1] === '/')) i += 1
+      i += 2
+      out += ' '
+      continue
+    }
+    // String or template literal: copy verbatim, honoring escapes.
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      out += ch
+      i += 1
+      while (i < n) {
+        const c = code[i]
+        if (c === '\\') {
+          out += c + (code[i + 1] ?? '')
+          i += 2
+          continue
+        }
+        out += c
+        i += 1
+        if (c === quote) break
+      }
+      continue
+    }
+
+    out += ch
+    i += 1
+  }
+
+  return out
+}
+
+/**
+ * What leaves the browser and touches the machine.
+ *
+ * The official ego surface — `task`, `page`, `console`, plain JavaScript — is
+ * never matched: those are the browser API this plugin exists to expose, so an
+ * ordinary automation script runs without a prompt. Only real host access does.
+ *
+ * `node:path` is deliberately absent: it is pure string computation with no
+ * filesystem access. `node:os` is present because it reads host identity.
+ */
+const HOST_PRIMITIVES = [
   {
     pattern: /(?:from|require\s*\(|import\s*\()\s*['"](?:node:)?(?:fs|fs\/promises)['"]/,
-    label: 'the filesystem module',
+    label: 'the filesystem (node:fs)',
   },
   {
     pattern: /(?:from|require\s*\(|import\s*\()\s*['"](?:node:)?child_process['"]/,
-    label: 'subprocess spawning',
+    label: 'subprocess spawning (node:child_process)',
   },
   {
     pattern: /(?:from|require\s*\(|import\s*\()\s*['"](?:node:)?(?:net|tls|dgram|http|https|worker_threads)['"]/,
@@ -70,11 +139,11 @@ const HOST_PRIMITIVE_PATTERNS = [
   },
   {
     pattern: /(?:from|require\s*\(|import\s*\()\s*['"](?:node:)?(?:os|vm)['"]/,
-    label: 'host OS or VM access',
+    label: 'host OS or VM access (node:os / node:vm)',
   },
   {
-    pattern: /\bprocess\s*\.\s*(?:exit|kill|binding|dlopen)\s*\(/,
-    label: 'process control',
+    pattern: /\bprocess\s*\.\s*(?:env|exit|kill|binding|dlopen)\b/,
+    label: 'process environment or control',
   },
   {
     pattern: /\b(?:eval|new\s+Function)\s*\(/,
@@ -85,12 +154,13 @@ const HOST_PRIMITIVE_PATTERNS = [
 /**
  * Describe which host primitives a script touches.
  * @param script - the untrusted script text.
- * @returns the reasons found; an empty array means "browser-level only".
+ * @returns the reasons found; an empty array means "official browser surface only".
  */
 function hostPrimitivesIn(script) {
+  const code = stripComments(script)
   const reasons = []
-  for (const { pattern, label } of HOST_PRIMITIVE_PATTERNS) {
-    if (pattern.test(script)) reasons.push(label)
+  for (const { pattern, label } of HOST_PRIMITIVES) {
+    if (pattern.test(code)) reasons.push(label)
   }
   return reasons
 }
