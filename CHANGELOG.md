@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.0 — 2026-10-28
+
+Stop asking. The browser surface is free; anything else is refused instead of prompting.
+
+- **Default mode is now `block`.** A script that leaves the browser surface is refused
+  with guidance instead of raising an approval prompt, so using the browser never
+  interrupts the user. Host work belongs on the normal `pwsh`/file tools, where the
+  session sandbox and its own approval policy already apply.
+- **One mental model on both channels.** The shell passthrough already refused host
+  scripts; the tool now behaves the same way. Previously the tool asked, the shim
+  refused, and the same script got two different answers.
+- **The refusal is actionable.** It names the primitive, explains why this tool is
+  exempt from the file sandbox, and suggests splitting the flow: drive the browser and
+  save the artifact (`page.screenshot`, `download.saveAs`, `page.fetch` with `saveAs`),
+  then process it with the normal tools.
+- **Backward compatible.** `requireApproval: "host-primitives"` (the old default) maps
+  to `ask`, and `ask`/`never` still work, so existing profiles keep their behaviour.
+- Gate suite grew to 41 checks, covering the new default, the redirect wording, and the
+  legacy mapping.
+
 ## 1.1.0 — 2026-10-28
 
 Invisible to the model: the official command now works in a confined shell, and the plugin

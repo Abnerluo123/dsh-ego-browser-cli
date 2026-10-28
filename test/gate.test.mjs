@@ -138,5 +138,40 @@ check(
   check('non-ego tools pass through', result.kind, 'allow')
 }
 
+// ---- 8. the default is `block`: refuse host scripts, never interrupt ----
+{
+  const mountMode = (config) => {
+    let gate = null
+    const ctx = {
+      on: (event, handler) => { if (event === 'tools/pre-execute') gate = handler; return () => {} },
+      tools: { register: () => () => {} },
+    }
+    apply(ctx, config)
+    return async (script) => {
+      const result = await gate({ name: 'ego_browser', arguments: { script } }, async () => ({ kind: 'allow' }))
+      return { kind: result.kind, reason: result.reason ?? '' }
+    }
+  }
+
+  // No requireApproval key in the config at all.
+  const defaultMode = mountMode({ timeoutMs: 60000 })
+
+  const browserOk = await defaultMode('await page.goto("https://x")')
+  check('default: browser script passes', browserOk.kind, 'allow')
+
+  const hostBlocked = await defaultMode('const fs = await import("node:fs")')
+  check('default: host script is denied, not asked', hostBlocked.kind, 'deny')
+  check('default: denial names the primitive', /node:fs/.test(hostBlocked.reason), true)
+  check('default: denial redirects to normal tools', /pwsh|file tools/.test(hostBlocked.reason), true)
+  check('default: denial suggests splitting the flow', /split/i.test(hostBlocked.reason), true)
+
+  // The legacy value maps to ask, so existing configs keep their behaviour.
+  const legacy = await mountMode({ requireApproval: 'host-primitives', timeoutMs: 60000 })(`await import('node:fs')`)
+  check('legacy "host-primitives" still asks', legacy.kind, 'ask')
+
+  const explicitAsk = await mountMode({ requireApproval: 'ask', timeoutMs: 60000 })(`await import('node:fs')`)
+  check('explicit "ask" asks', explicitAsk.kind, 'ask')
+}
+
 console.log(`\n=== ${failures === 0 ? 'ALL GATE CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===`)
 process.exitCode = failures === 0 ? 0 : 1

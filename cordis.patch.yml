@@ -1,8 +1,14 @@
 # dsh-ego-browser-cli bundle patch.
 #
-# One insert row mounts the Host half. The plugin needs only `tools`; the
-# approval service is looked up lazily so a composition without it still boots
-# (risky scripts then fail closed instead of prompting).
+# One insert row mounts the Host half. The plugin needs only `tools`.
+#
+# `requireApproval` modes:
+#   block  (default) — a script that leaves the browser surface is refused with
+#                      guidance; nobody is interrupted. Host work belongs on the
+#                      normal pwsh/file tools, which apply the session sandbox and
+#                      their own approval policy.
+#   ask             — raise one approval request per offending call instead.
+#   never           — disable the browser/host check entirely.
 #
 # `executable` is deliberately NOT set: the plugin locates ego-browser itself,
 # following the junction ego's own onboarding creates
@@ -13,5 +19,5 @@
     - id: ego-browser-cli
       name: dsh-ego-browser-cli
       config:
-        requireApproval: host-primitives
+        requireApproval: block
         timeoutMs: 240000

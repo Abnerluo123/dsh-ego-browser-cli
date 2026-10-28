@@ -422,7 +422,12 @@ export function apply(ctx, config) {
   // own updater, so an in-place upgrade keeps working without a config edit.
   const resolved = resolveExecutable(options.executable)
 
-  const requireApproval = options.requireApproval ?? 'host-primitives'
+  // `block` (default) refuses host scripts without interrupting anyone;
+  // `ask` raises one approval request per offending call; `never` disables the
+  // check. The legacy value `host-primitives` maps to `ask`.
+  const requireApproval = options.requireApproval === undefined
+    ? 'block'
+    : options.requireApproval === 'host-primitives' ? 'ask' : options.requireApproval
   const cwd = typeof options.cwd === 'string' && isAbsolute(options.cwd)
     ? options.cwd
     : homedir()
@@ -460,9 +465,15 @@ export function apply(ctx, config) {
     }, 'ego-browser-cli shell passthrough')
   }
 
-  // Consent gate. Returning `{kind:'ask'}` hands the decision to the approval
-  // service, so the session's `never` policy still rejects deterministically
-  // and an absent approval channel still fails closed.
+  // Browser/host gate.
+  //
+  // Default is `block`: a script that leaves the browser surface is refused with
+  // guidance, and the user is never interrupted. Host work belongs on the normal
+  // pwsh/file tools, where the session sandbox and its own approval policy apply
+  // — so this plugin stays a permission layer, not a prompt generator.
+  //
+  // `ask` keeps the older behaviour (one approval request per offending call) for
+  // deployments that prefer a human decision. `never` disables the check.
   ctx.on('tools/pre-execute', async (exec, next) => {
     if (exec.name !== TOOL_NAME) return next()
     if (requireApproval === 'never') return next()
@@ -473,13 +484,27 @@ export function apply(ctx, config) {
     const reasons = hostPrimitivesIn(script)
     if (reasons.length === 0) return next()
 
+    const detail = reasons.join(', ')
+
+    if (requireApproval === 'ask') {
+      return {
+        kind: 'ask',
+        reason: `ego script touches ${detail}`,
+        displayReason: {
+          en: `This ego-browser script reaches outside the browser: ${detail}. Allow it?`,
+          zh: `这个 ego-browser 脚本会碰浏览器之外的东西：${detail}。允许吗？`,
+        },
+      }
+    }
+
     return {
-      kind: 'ask',
-      reason: `ego script touches ${reasons.join(', ')}`,
-      displayReason: {
-        en: `This ego-browser script reaches outside the browser: ${reasons.join(', ')}. Allow it?`,
-        zh: `这个 ego-browser 脚本会碰浏览器之外的东西：${reasons.join(', ')}。允许吗？`,
-      },
+      kind: 'deny',
+      reason:
+        `this script leaves the browser surface (${detail}), so it was not run. ` +
+        'Browser automation is unrestricted here; host access is not, because this tool executes outside the file sandbox. ' +
+        'Do host work with the normal pwsh or file tools, which apply the session sandbox and its approval policy. ' +
+        'If a single flow needs both, split it: let this call drive the browser and save its artifact ' +
+        '(page.screenshot, download.saveAs, page.fetch with saveAs), then handle the artifact with those tools.',
     }
   })
 

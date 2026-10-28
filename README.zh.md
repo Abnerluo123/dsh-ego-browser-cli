@@ -29,7 +29,7 @@ sandbox. Retry with Full Access or run ego-browser outside the agent sandbox.
 | 能力 | 行为 |
 |---|---|
 | 浏览器操作（导航、点击、填表、截图、取数据） | 直接运行，**不弹审批** |
-| 宿主级原语（裸 fs、子进程、套接字、`eval`） | 每次调用**弹一次审批** |
+| 宿主级原语（裸 fs、子进程、套接字、`eval`） | **拒绝并引导**，不弹窗 |
 
 会话保持 `workspace-write`，`write`、`edit`、`bash` 依旧受限。只有浏览器这条路走主进程。
 
@@ -169,11 +169,11 @@ console.log(JSON.stringify(info));
 
 闸门是**同意机制，不是隔离边界**。
 
-`ego-browser nodejs` 按设计运行真正的 Node.js 并具有宿主权限——官方 skill 明确这么写。闸门扫描脚本文本以暴露有风险的调用，但刻意构造或混淆的脚本可以绕过文本扫描。请把弹窗当作提示信号，而非安全保证。
+`ego-browser nodejs` 按设计运行真正的 Node.js 并具有宿主权限——官方 skill 明确这么写。闸门扫描脚本文本以拦住明显的情况，但刻意构造或混淆的脚本可以绕过文本扫描。请把拒绝当作护栏，而不是安全保证。
 
 这是方法本身固有的性质，不是实现的缺陷：任何赋予浏览器完整能力的路径，都会让驱动它的脚本获得同等触达。如果你需要真正的隔离，浏览器必须跑在容器、microVM 或其他隔离环境中——本插件不会假装自己做到了这一点。
 
-在插件配置里设 `requireApproval: "never"` 可完全关闭弹窗。
+在插件配置里设 `requireApproval: "never"` 可完全关闭这项检查。
 
 ## 配置
 
@@ -184,7 +184,7 @@ console.log(JSON.stringify(info));
     - id: ego-browser-cli
       name: dsh-ego-browser-cli
       config:
-        requireApproval: host-primitives   # 或 "never"
+        requireApproval: block   # block（默认）| ask | never
         timeoutMs: 240000
         # executable: /custom/path/ego-browser   # 仅用于非标准安装
 ```
