@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Release artifacts
+dist/
+*.tgz
+*.zip
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local test scratch
+lambda-lab/
+*.log

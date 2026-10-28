@@ -1,0 +1,17 @@
+# dsh-ego-browser-cli bundle patch.
+#
+# One insert row mounts the Host half. The plugin needs only `tools`; the
+# approval service is looked up lazily so a composition without it still boots
+# (risky scripts then fail closed instead of prompting).
+#
+# `executable` is deliberately NOT set: the plugin locates ego-browser itself,
+# following the junction ego's own onboarding creates
+# (~/.local/share/ego/active_version_dir), then PATH. That keeps this patch
+# portable across machines and across ego upgrades. Set `executable` only to
+# override a non-standard install layout.
+- insert:
+    - id: ego-browser-cli
+      name: dsh-ego-browser-cli
+      config:
+        requireApproval: host-primitives
+        timeoutMs: 240000

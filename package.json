@@ -1,0 +1,43 @@
+{
+  "name": "dsh-ego-browser-cli",
+  "version": "1.0.0",
+  "description": "Run the official ego-browser CLI from the DSH host process, so full Ego Lite capability works under workspace-write without switching the whole session to Full access.",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "skill",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "ego-browser",
+    "ego-lite",
+    "browser-automation"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abnerluo123/dsh-ego-browser-cli.git"
+  },
+  "scripts": {
+    "test": "node test/mount.test.mjs && node test/portability.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# Normalize line endings so the bash installer keeps working on macOS/Linux
+# even when the repo is checked out on Windows.
+* text=auto
+*.sh text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.ps1 text eol=crlf
+
+# Binary
+*.png binary

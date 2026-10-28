@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # Only the mount suite runs here: it needs no browser.
+    # test/portability.test.mjs drives a real Ego Lite install, so it is a
+    # local-only check (see README "Tests").
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Mount suite (registration, gate, render, arg validation)
+        run: node test/mount.test.mjs
+      - name: Package metadata sanity
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+            if (!pkg.dsh?.bundle?.patch) throw new Error("missing dsh.bundle.patch");
+            if (pkg.private === true) throw new Error("package must not be private to publish");
+            const patch = readFileSync(pkg.dsh.bundle.patch, "utf8");
+            if (!patch.includes("dsh-ego-browser-cli")) throw new Error("patch does not mount the plugin");
+            console.log("package metadata OK");
+          '
+      - name: Plugin module loads
+        run: |
+          node --input-type=module -e '
+            import { apply, name, inject } from "./index.js";
+            if (typeof apply !== "function") throw new Error("apply must be exported");
+            if (typeof name !== "string") throw new Error("name must be exported");
+            if (!Array.isArray(inject) || !inject.includes("tools")) throw new Error("inject must include tools");
+            console.log("module contract OK");
+          '
