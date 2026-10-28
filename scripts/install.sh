@@ -7,8 +7,10 @@
 # Usage:
 #   bash install.sh                          # default profile: desktop
 #   bash install.sh --profile tui            # another profile
-#   bash install.sh --skill-dir ~/my/skills  # custom skill location
-#   bash install.sh --no-skill               # skip the skill
+#   bash install.sh --dsh-home /path/to/.dsh # non-default DSH home
+#
+# Installs no skill on purpose: this is a permission layer, and a skill entry
+# would add context the model does not need.
 #
 # Never uses sudo. Fails loudly instead of guessing a path.
 
@@ -17,7 +19,7 @@ set -euo pipefail
 PROFILE="desktop"
 DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
 SKILL_DIR=""
-INSTALL_SKILL=1
+INSTALL_SKILL=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -60,13 +62,9 @@ step "profile: $PROFILE_DIR"
 
 TARGET="$PROFILE_DIR/node_modules/dsh-ego-browser-cli"
 mkdir -p "$TARGET"
-for f in index.js package.json cordis.patch.yml LICENSE; do
+for f in index.js proxy.js package.json cordis.patch.yml LICENSE; do
   [ -f "$SOURCE/$f" ] && cp -f "$SOURCE/$f" "$TARGET/$f"
 done
-if [ -f "$SOURCE/skill/SKILL.md" ]; then
-  mkdir -p "$TARGET/skill"
-  cp -f "$SOURCE/skill/SKILL.md" "$TARGET/skill/SKILL.md"
-fi
 step "installed plugin files -> $TARGET"
 
 PKG="$PROFILE_DIR/package.json"
@@ -102,16 +100,10 @@ else
 fi
 
 if [ "$INSTALL_SKILL" -eq 1 ]; then
-  if [ -z "$SKILL_DIR" ]; then
-    SKILL_DIR="$HOME/.agents/skills/ego-browser-cli"
-  fi
-  mkdir -p "$SKILL_DIR"
-  if [ -f "$SOURCE/skill/SKILL.md" ]; then
-    cp -f "$SOURCE/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
-    step "skill installed -> $SKILL_DIR/SKILL.md"
-  fi
-else
-  step "skill skipped (--no-skill)"
+  # This plugin deliberately installs NO skill: it is a permission layer, and a
+  # skill catalogue entry would add context the model does not need. The official
+  # ego-browser skill already documents the API.
+  step "no skill installed (permission-only plugin)"
 fi
 
 echo ""

@@ -34,6 +34,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { accessSync, constants as fsConstants } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, delimiter, isAbsolute, join } from 'node:path'
+import { startProxy } from './proxy.js'
 
 /** Cordis plugin name. */
 export const name = 'ego-browser-cli'
@@ -156,7 +157,7 @@ const HOST_PRIMITIVES = [
  * @param script - the untrusted script text.
  * @returns the reasons found; an empty array means "official browser surface only".
  */
-function hostPrimitivesIn(script) {
+export function hostPrimitivesIn(script) {
   const code = stripComments(script)
   const reasons = []
   for (const { pattern, label } of HOST_PRIMITIVES) {
@@ -429,6 +430,35 @@ export function apply(ctx, config) {
   const defaultTimeout = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
     : DEFAULT_TIMEOUT_MS
+
+  // Shell passthrough: install a shim so the OFFICIAL command works inside a
+  // confined shell. This is what keeps the plugin out of the model's context —
+  // an agent can follow the ego skill verbatim instead of learning our tool.
+  //
+  // The shim forwards to this process, so it is a sandbox bypass for the browser
+  // path. `hostPrimitivesIn` still gates it: browser scripts pass, host scripts
+  // are refused and the agent is pointed at the normal tools, which escalate
+  // through the session's approval policy.
+  if (options.shellProxy !== false && typeof ctx.effect === 'function') {
+    ctx.effect(() => {
+      let proxy = null
+      let disposed = false
+      startProxy({
+        executable: resolved.command,
+        filter: hostPrimitivesIn,
+        timeoutMs: defaultTimeout,
+      }).then((started) => {
+        if (disposed) { started.dispose(); return }
+        proxy = started
+      }).catch(() => {
+        // Best effort: the eg_browser tool still works without passthrough.
+      })
+      return () => {
+        disposed = true
+        if (proxy !== null) proxy.dispose()
+      }
+    }, 'ego-browser-cli shell passthrough')
+  }
 
   // Consent gate. Returning `{kind:'ask'}` hands the decision to the approval
   // service, so the session's `never` policy still rejects deterministically

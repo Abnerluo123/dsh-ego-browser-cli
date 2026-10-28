@@ -7,8 +7,7 @@
 # Usage:
 #   pwsh -File install.ps1                      # default profile: desktop
 #   pwsh -File install.ps1 -Profile tui         # another profile
-#   pwsh -File install.ps1 -SkillDir C:\path    # custom skill location
-#   pwsh -File install.ps1 -NoSkill             # skip the skill
+#   pwsh -File install.ps1 -DshHome C:\path     # non-default DSH home
 #
 # Never elevates. Fails loudly instead of guessing a path.
 
@@ -16,8 +15,6 @@
 param(
     [string]$Profile = "desktop",
     [string]$DshHome = $(if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $env:USERPROFILE ".dsh" }),
-    [string]$SkillDir = "",
-    [switch]$NoSkill,
     [switch]$Force
 )
 
@@ -58,16 +55,11 @@ Write-Step "profile: $profileDir"
 $target = Join-Path (Join-Path $profileDir "node_modules") "dsh-ego-browser-cli"
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 
-foreach ($file in @("index.js", "package.json", "cordis.patch.yml", "LICENSE")) {
+foreach ($file in @("index.js", "proxy.js", "package.json", "cordis.patch.yml", "LICENSE")) {
     $from = Join-Path $source $file
     if (Test-Path -LiteralPath $from -PathType Leaf) {
         Copy-Item -LiteralPath $from -Destination (Join-Path $target $file) -Force
     }
-}
-$skillSource = Join-Path $source "skill\SKILL.md"
-if (Test-Path -LiteralPath $skillSource -PathType Leaf) {
-    New-Item -ItemType Directory -Force -Path (Join-Path $target "skill") | Out-Null
-    Copy-Item -LiteralPath $skillSource -Destination (Join-Path $target "skill\SKILL.md") -Force
 }
 Write-Step "installed plugin files -> $target"
 
@@ -131,34 +123,10 @@ if ($current -ceq $json) {
     Write-Step "package.json updated (backup: $(Split-Path -Leaf $backup))"
 }
 
-# ---- install the skill ----
-if (-not $NoSkill) {
-    if (-not $SkillDir) {
-        $SkillDir = Join-Path (Join-Path $env:USERPROFILE ".agents\skills") "ego-browser-cli"
-    }
-    New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null
-    $skillTarget = Join-Path $SkillDir "SKILL.md"
-
-    # Ego Lite can expose its bundled skill as a junction; replace it rather than
-    # writing through the link.
-    if (Test-Path -LiteralPath $SkillDir) {
-        $item = Get-Item -LiteralPath $SkillDir -Force
-        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-            if (Test-Path -LiteralPath $skillTarget -PathType Leaf) {
-                Copy-Item -LiteralPath $skillTarget -Destination (Join-Path $SkillDir "SKILL.official.md") -Force
-            }
-            [System.IO.Directory]::Delete($SkillDir, $false)
-            New-Item -ItemType Directory -Path $SkillDir | Out-Null
-            Write-Step "replaced skill junction with a local directory"
-        }
-    }
-    if (Test-Path -LiteralPath $skillSource -PathType Leaf) {
-        Copy-Item -LiteralPath $skillSource -Destination $skillTarget -Force
-        Write-Step "skill installed -> $skillTarget"
-    }
-} else {
-    Write-Step "skill skipped (-NoSkill)"
-}
+# ---- no skill is installed ----
+# This plugin is a permission layer; a skill entry would add context the model
+# does not need. The official ego-browser skill already documents the API.
+Write-Step "no skill installed (permission-only plugin)"
 
 # ---- verify ego-browser is discoverable ----
 $egoFound = $null

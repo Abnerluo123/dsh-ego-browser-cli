@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.0 — 2026-10-28
+
+Invisible to the model: the official command now works in a confined shell, and the plugin
+installs no skill.
+
+- **Shell passthrough.** At startup the plugin starts a loopback endpoint and writes a tiny
+  `ego-browser` shim onto `PATH`, so `ego-browser nodejs < script.mjs` works verbatim under
+  `workspace-write`. An agent can follow the official ego skill with no knowledge of this
+  plugin. Verified from a real confined shell: the command returned the page title that the
+  harness process fetched.
+- **Browser/host split enforced at the shim.** `nodejs` with a browser-only script, plus
+  `skill`/`help`/`--version`, pass; a script importing `node:fs`, `child_process`, sockets or
+  `eval` is refused with a message pointing at the normal tools; `upgrade`, `import` and any
+  other subcommand are refused. The shim secret is a per-mount random token and the endpoint
+  binds to loopback only.
+- **No skill installed.** The bundled `ego-browser-cli` skill is gone: it added a
+  skill-catalogue entry to every prompt for a plugin whose job is permission control. The
+  official ego skill documents the API.
+- **Robustness.** The shim falls back to the real binary when the proxy is unreachable; the
+  shim directory is per-process so two harnesses cannot delete each other's entry; `PATH`
+  gets both native and Git-Bash spellings; `resolveNodePath()` finds the runtime DSH ships
+  instead of trusting `process.execPath`, which is the Electron launcher.
+- New `test/proxy.test.mjs`: 18 checks over transport, the subcommand whitelist, the script
+  filter, the shim secret, and dispose cleanup. It uses a Node stand-in, so it needs neither
+  Ego Lite nor a browser. CI runs it.
+
 ## 1.0.2 — 2026-10-28
 
 One task space per session, as the official guide intends.

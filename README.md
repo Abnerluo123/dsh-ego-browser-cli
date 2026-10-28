@@ -79,19 +79,20 @@ bash scripts/install.sh
 ```
 
 The installer writes the plugin into your profile's `node_modules`, registers it in that
-profile's `package.json` (both `dependencies` and `dsh.profile.bundles`), backs the file up
-first, and installs the skill to `~/.agents/skills/ego-browser-cli/`.
+profile's `package.json` (both `dependencies` and `dsh.profile.bundles`), and backs the file
+up first. It installs **no skill**: this is a permission layer, and a skill-catalogue entry
+would add context the model does not need.
 
 Useful flags:
 
 ```powershell
 pwsh -File scripts/install.ps1 -Profile tui      # non-default profile
-pwsh -File scripts/install.ps1 -NoSkill          # skip the skill
+pwsh -File scripts/install.ps1 -DshHome C:\path  # non-default DSH home
 ```
 
 ```bash
 bash scripts/install.sh --profile tui
-bash scripts/install.sh --no-skill
+bash scripts/install.sh --dsh-home /path/to/.dsh
 ```
 
 ### 3. Restart DeepSeek Harness
@@ -109,6 +110,38 @@ console.log(JSON.stringify({ title: await page.title(), url: await page.url() })
 
 A JSON line with the page title in the result means the whole chain works: loader →
 executable discovery → unconfined spawn.
+
+## Zero context footprint
+
+The point of this plugin is to be **invisible to the model**. It installs no skill and adds
+no system-prompt text, so the model keeps following the official ego skill.
+
+To make that possible it also runs a **shell passthrough**: at startup it writes a tiny
+`ego-browser` shim, puts that directory on `PATH`, and serves a loopback endpoint. Inside a
+confined shell the official command now works verbatim:
+
+```bash
+ego-browser nodejs < script.mjs      # works under workspace-write
+```
+
+The shim forwards argv and stdin to the harness process, which runs the real binary and
+returns exit code plus both streams. If the proxy is unreachable it falls back to the real
+binary, so the command never becomes unusable.
+
+The passthrough still respects the browser/host split:
+
+| Through the shim | Behaviour |
+|---|---|
+| `nodejs` with a browser-only script, `skill`, `help`, `--version` | allowed |
+| `nodejs` with a script that imports `node:fs`, `child_process`, sockets, `eval`, … | **refused**, with a message pointing at the normal tools |
+| `upgrade`, `import` and any other subcommand | refused |
+
+Host work is meant to go through the ordinary `pwsh`/file tools, which apply the session
+sandbox and escalate through the approval policy — so the browser path stays the only
+unconfined channel, and only for browser work.
+
+Turn it off with `shellProxy: false` in the plugin config if you would rather keep the shell
+unmodified.
 
 ## Usage
 
@@ -235,8 +268,8 @@ pwsh -File scripts/install.ps1 -h    # prints usage; rollback path is printed by
 ```
 
 Manual rollback: restore the `package.json.bak.*` backup the installer printed, delete
-`<profile>/node_modules/dsh-ego-browser-cli`, remove `~/.agents/skills/ego-browser-cli/`, and
-restart.
+`<profile>/node_modules/dsh-ego-browser-cli`, and restart. Nothing else is written outside
+the profile: the shim lives in the OS temp directory and is removed when the plugin unloads.
 
 ## License
 

@@ -71,19 +71,19 @@ bash scripts/install.sh
 ```
 
 安装脚本会把插件写入 profile 的 `node_modules`，在 profile 的 `package.json` 中登记
-（`dependencies` 与 `dsh.profile.bundles` 两处），先备份原文件，并把 skill 安装到
-`~/.agents/skills/ego-browser-cli/`。
+（`dependencies` 与 `dsh.profile.bundles` 两处），并先备份原文件。它**不安装任何 skill**：
+这是一个权限层，skill 目录条目会给模型增加不必要的上下文。
 
 常用参数：
 
 ```powershell
 pwsh -File scripts/install.ps1 -Profile tui      # 指定其他 profile
-pwsh -File scripts/install.ps1 -NoSkill          # 不安装 skill
+pwsh -File scripts/install.ps1 -DshHome C:\path  # 指定其他 DSH 主目录
 ```
 
 ```bash
 bash scripts/install.sh --profile tui
-bash scripts/install.sh --no-skill
+bash scripts/install.sh --dsh-home /path/to/.dsh
 ```
 
 ### 3. 重启 DeepSeek Harness
@@ -100,6 +100,30 @@ console.log(JSON.stringify({ title: await page.title(), url: await page.url() })
 ```
 
 结果里出现带页面标题的 JSON 行，说明整条链路正常：加载器 → 查找可执行文件 → 无限制启动。
+
+## 零上下文足迹
+
+这个插件的目的就是**对模型隐形**：它不安装 skill、不注入系统提示，模型继续按官方 ego skill 走。
+
+为此它还提供**shell 透传**：启动时写一个极小的 `ego-browser` shim，把该目录加入 `PATH`，并在本机回环上开一个接口。于是官方命令在受限 shell 里可以直接用：
+
+```bash
+ego-browser nodejs < script.mjs      # workspace-write 下可用
+```
+
+shim 把参数和 stdin 转发给 Harness 进程，由它执行真正的二进制并回传退出码与两路输出。代理不可用时自动回退到真二进制，命令不会失效。
+
+透传仍遵守「浏览器 / 宿主」的分界：
+
+| 经由 shim | 行为 |
+|---|---|
+| `nodejs` + 纯浏览器脚本、`skill`、`help`、`--version` | 放行 |
+| `nodejs` + 含 `node:fs`、`child_process`、套接字、`eval` 等的脚本 | **拒绝**，并提示改用普通工具 |
+| `upgrade`、`import` 及其他子命令 | 拒绝 |
+
+宿主操作应当走普通的 `pwsh`/文件工具——它们适用会话沙箱，并按审批策略提权。这样浏览器这条路是唯一的无限制通道，且仅限浏览器行为。
+
+想保持 shell 原样，可在插件配置里设 `shellProxy: false` 关闭。
 
 ## 用法
 
@@ -193,8 +217,8 @@ node test/portability.test.mjs  # 可执行文件查找、升级容错、缺失 
 ## 卸载
 
 手动回滚：还原安装脚本打印出的 `package.json.bak.*` 备份，删除
-`<profile>/node_modules/dsh-ego-browser-cli`，移除 `~/.agents/skills/ego-browser-cli/`，
-然后重启。
+`<profile>/node_modules/dsh-ego-browser-cli`，然后重启。插件不在 profile 之外留任何东西：
+shim 位于系统临时目录，插件卸载时会被删除。
 
 ## 许可证
 

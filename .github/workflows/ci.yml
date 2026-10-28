@@ -26,6 +26,8 @@ jobs:
         run: node test/gate.test.mjs
       - name: Space suite (one space per session, explicit targeting wins)
         run: node test/space.test.mjs
+      - name: Proxy suite (shell passthrough transport, whitelist, filter, cleanup)
+        run: node test/proxy.test.mjs
       - name: Package metadata sanity
         run: |
           node --input-type=module -e '
