@@ -1,80 +1,53 @@
-// Task-space selection suite.
-//
-// The official ego guide asks for one TaskSpace per user goal and provides
-// `taskSpace(name)` to resume a space by name. The plugin previously used a
-// timestamped name, which recreated a space on every call and left strays
-// behind. These checks pin the fix: the default name must be stable for a
-// session, and explicit targeting must still win.
-import { defaultSpaceName, spacePreamble } from '../index.js'
+import assert from 'node:assert/strict'
+import { defaultSpaceName, spacePreamble, prepareScript } from '../index.js'
 
-let failures = 0
-const check = (label, actual, expected) => {
-  const ok = actual === expected
-  if (!ok) failures++
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`)
-  if (!ok) console.log(`        expected: ${JSON.stringify(expected)}\n        actual:   ${JSON.stringify(actual)}`)
+const exec = { agent: { session: { id: 'alpha' } } }
+assert.equal(defaultSpaceName(exec), defaultSpaceName(exec))
+assert.notEqual(defaultSpaceName(exec), defaultSpaceName({ agent: { session: { id: 'beta' } } }))
+assert.equal(defaultSpaceName({}), defaultSpaceName())
+assert.match(spacePreamble({ spaceId: 42, spaceName: 'ignored' }, exec), /taskSpace\(42\)/)
+assert.match(spacePreamble({ spaceName: ' goal ', profileId: 'Profile 5' }, exec), /taskSpace\("goal", \{ profileId: "Profile 5" \}\)/)
+assert.throws(() => spacePreamble({ spaceId: 42, profileId: 'Profile 5' }, exec), /new space/)
+const name = 'x"); process.exit(1); //'
+assert.ok(spacePreamble({ spaceName: name }, exec).startsWith(`const task = await taskSpace(${JSON.stringify(name)});`))
+assert.throws(() => prepareScript({ mode: 'official', spaceId: 1, script: 'x' }, exec), /official mode/)
+
+// No eager selection: profile listing/control helpers/full official scripts can
+// run even when a convenience space has been handed to the user.
+let selections = 0
+const official = 'console.log("official source")'
+assert.equal(prepareScript({ script: official }, exec), official)
+assert.equal(selections, 0)
+
+// Simulate SDK state in managed mode, including success/keep/handoff rules.
+const spaces = new Map()
+let nextId = 1
+const taskSpace = async (target, options) => {
+  selections++
+  let task = typeof target === 'number' ? [...spaces.values()].find(s => s.spaceId === target) : spaces.get(target)
+  if (task?.ownership === 'user') throw new Error('EGO_TASK_SPACE_NAME_IN_USE')
+  if (!task) {
+    task = {
+      spaceId: nextId++, profile: options?.profileId, ownership: 'agent',
+      page: () => ({ label: 'p1' }),
+      async finish({ keep }) { if (keep.length === 0) spaces.delete(target); else this.ownership = 'user' },
+      async handOff() { this.ownership = 'user' },
+    }
+    spaces.set(target, task)
+  }
+  return task
 }
-
-const execOf = (sessionId) => ({ agent: { session: { id: sessionId } } })
-
-// ---- 1. the default name is stable per session ----
-const a1 = defaultSpaceName(execOf('session-alpha'))
-const a2 = defaultSpaceName(execOf('session-alpha'))
-const b1 = defaultSpaceName(execOf('session-beta'))
-
-check('same session yields the same name', a1, a2)
-check('different sessions yield different names', a1 === b1, false)
-check('name carries the session id', a1.includes('session-alpha'), true)
-check('name has no timestamp-like suffix', /\d{10,}/.test(a1), false)
-
-// ---- 2. repeated calls produce an identical prelude (the actual fix) ----
-const p1 = spacePreamble({ script: 'x' }, execOf('session-alpha'))
-const p2 = spacePreamble({ script: 'y' }, execOf('session-alpha'))
-check('identical prelude across calls in one session', p1, p2)
-check('prelude resolves by name, not by minting an id', p1.startsWith('const task = await taskSpace("'), true)
-check('prelude ends with a newline', p1.endsWith('\n'), true)
-check('prelude has no Date.now', p1.includes('Date.now'), false)
-
-// ---- 3. explicit targeting wins ----
-check(
-  'spaceId wins over everything',
-  spacePreamble({ spaceId: 42, spaceName: 'ignored' }, execOf('s')),
-  'const task = await taskSpace(42);\n',
-)
-check(
-  'spaceName wins over the session default',
-  spacePreamble({ spaceName: 'my-goal' }, execOf('s')),
-  'const task = await taskSpace("my-goal");\n',
-)
-check(
-  'blank spaceName falls back to the session default',
-  spacePreamble({ spaceName: '   ' }, execOf('session-z')),
-  `const task = await taskSpace(${JSON.stringify(defaultSpaceName(execOf('session-z')))});\n`,
-)
-check(
-  'spaceName is trimmed',
-  spacePreamble({ spaceName: '  padded  ' }, execOf('s')),
-  'const task = await taskSpace("padded");\n',
-)
-
-// ---- 4. agentless calls stay stable instead of minting spaces ----
-const noAgent1 = defaultSpaceName({})
-const noAgent2 = defaultSpaceName(undefined)
-check('agentless name is stable', noAgent1, noAgent2)
-check('agentless name is not timestamped', /\d{10,}/.test(noAgent1), false)
-
-// ---- 5. an attacker-shaped name cannot break out of the string literal ----
-const injected = spacePreamble({ spaceName: 'x"); process.exit(1); //' }, execOf('s'))
-check(
-  'quotes in spaceName are escaped',
-  injected.includes('process.exit'),
-  true,
-)
-check(
-  'escaped name stays inside one string literal',
-  /^const task = await taskSpace\("(?:[^"\\]|\\.)*"\);\n$/.test(injected),
-  true,
-)
-
-console.log(`\n=== ${failures === 0 ? 'ALL SPACE CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===`)
-process.exitCode = failures === 0 ? 0 : 1
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+const run = (args) => new AsyncFunction('taskSpace', prepareScript(args, exec))(taskSpace)
+await run({ mode: 'managed', script: 'task.marker = 123' })
+await run({ mode: 'managed', script: 'if (task.marker !== 123) throw Error("not resumed")' })
+assert.equal(spaces.size, 1)
+await run({ mode: 'managed', script: 'await task.finish({ keep: [] })' })
+assert.equal(spaces.size, 0)
+await run({ spaceName: 'new-goal', profileId: 'Profile 5', script: 'if (task.profile !== "Profile 5") throw Error("profile lost"); await task.finish({ keep: [] })' })
+await run({ spaceName: 'kept', script: 'await task.finish({ keep: ["p1"] })' })
+await assert.rejects(run({ spaceName: 'kept', script: 'throw Error("must not run")' }), /EGO_TASK_SPACE_NAME_IN_USE/)
+await run({ spaceName: 'handoff', script: 'await task.handOff()' })
+await assert.rejects(run({ spaceName: 'handoff', script: 'throw Error("must not run")' }), /EGO_TASK_SPACE_NAME_IN_USE/)
+assert.equal(prepareScript({ script: 'await claimTaskSpace(7)' }, exec), 'await claimTaskSpace(7)')
+console.log('PASS official syntax and managed space/profile lifecycle, keep/handoff ownership protection')

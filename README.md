@@ -1,281 +1,131 @@
 # dsh-ego-browser-cli
 
-**Use the official Ego Lite browser in DeepSeek Harness — with full capability, without
-giving up file confinement.**
-
-A DSH plugin that runs the official `ego-browser` CLI from the Harness host process and
-exposes it as one `ego_browser` tool.
+Use the full official Ego Lite runtime from a DSH `workspace-write` session without switching every browser call to Full access.
 
 [中文说明](README.zh.md) · MIT
 
----
+## Trust scope in 2.0
 
-## The problem it solves
+This plugin is for an Ego Lite browser dedicated to agent automation. It provides a trusted host execution lane for `ego_browser` and the `ego-browser` shell command. It does not scan scripts, register approval/permission hooks, change DSH presets or relax other tools' policy.
 
-`ego-browser` cannot start under a confined file policy. The sandboxed shell has no access
-to the ego daemon's bootstrap channel:
-
-```
-$ ego-browser nodejs -e "console.log(1)"
-Failed to connect to ego_cli bootstrap
-Agent note: ego-browser cannot connect to the ego_cli bootstrap from the default agent
-sandbox. Retry with Full Access or run ego-browser outside the agent sandbox.
-```
-
-The only sanctioned escape is switching the session to **Full access** — which drops file
-confinement for *every* tool, not just the browser. So the usual choice is:
-
-- keep `workspace-write` and lose the browser, or
-- gain the browser and lose confinement everywhere.
-
-This plugin removes the trade-off. It applies the boundary where the boundary actually is:
-
-| Capability | Behaviour |
+| Entry point | Behavior |
 |---|---|
-| Browser automation (navigate, click, fill, screenshot, extract) | runs freely, **no prompt** |
-| Host-level primitives (raw fs, subprocess, sockets, `eval`) | **one approval prompt** per call |
+| `ego_browser` | Official `ego-browser nodejs` scripts, without plugin approval |
+| Shell `ego-browser` | Forward all argv, stdin and cwd to the fixed official executable |
+| Other DSH tools | Existing DSH sandbox and approval policy |
 
-The session stays on `workspace-write`. `write`, `edit`, and `bash` remain confined. Only
-the browser path runs from the host process.
+**The entire Ego script runtime is trusted.** Official `nodejs` runs real host Node, including imports, local scripts, files and network access. Screenshots, uploads and downloads also access host paths. This plugin does not isolate Node capabilities within an Ego script. DSH's global policy is unchanged, but the Ego entry point itself has host capabilities. Use normal DSH tools for general host work.
 
-## Why running from the host process is legitimate
+Browser-owned consent prompts, device selection and user takeover remain under Ego/website control. The plugin never fabricates consent or automatically claims user-owned spaces. Prepare a dedicated profile for unattended automation.
 
-This is not a sandbox bypass bolted on from outside. DSH's own MCP client already works this
-way — `dsh-mcp-client` spawns MCP servers through the MCP SDK's `StdioClientTransport`
-without routing through `ctx.sandbox` or `ctx.shell`. Tools reached over MCP are therefore
-unconfined by the same mechanism. This plugin makes that same path available to the
-**official** CLI, so you no longer need a separate MCP server to get a browser.
+## Install / update
 
-## Requirements
-
-- DeepSeek Harness with a profile you can edit
-- [Ego Lite](https://lite.ego.app/) installed, with onboarding completed
-  (onboarding is what registers `ego-browser` on the PATH)
-- Node.js 22+ (for the macOS/Linux installer script)
-
-## Install
-
-### 1. Get the plugin
-
-```bash
-git clone https://github.com/Abnerluo123/dsh-ego-browser-cli.git
-cd dsh-ego-browser-cli
-```
-
-Or download and unpack a release archive.
-
-### 2. Run the installer
-
-**Windows (PowerShell):**
+Requires an onboarded Ego Lite install and an editable DSH profile.
 
 ```powershell
+git clone https://github.com/Abnerluo123/dsh-ego-browser-cli.git
+cd dsh-ego-browser-cli
 pwsh -File scripts/install.ps1
 ```
 
-**macOS / Linux:**
+On macOS/Linux run `bash scripts/install.sh`. Optional Windows flags: `-Profile tui`, `-DshHome C:\path`. The default profile is desktop. Preserve the old plugin payload before updating for rollback; the installer backs up profile package metadata. Restart DSH, or reinstall the local bundle using the plugin manager on hosts supporting live application. Do not mount duplicate copies.
 
-```bash
-bash scripts/install.sh
+No extra skill is installed and the official Ego skill is not modified. Executable discovery follows Ego's version junction, standard install locations, and PATH.
+
+## Official scripts by default
+
+Pass `description` and `script` to `ego_browser`. Default `mode: "official"` sends source unchanged, without creating a task space or injecting task/page. Follow the official skill directly:
+
+```js
+const task = await taskSpace("my-browser-goal");
+const page = task.page("p1");
+await page.goto("https://example.com");
+console.log(JSON.stringify({ id: task.spaceId, title: await page.title() }));
+await task.finish({ keep: [] });
 ```
 
-The installer writes the plugin into your profile's `node_modules`, registers it in that
-profile's `package.json` (both `dependencies` and `dsh.profile.bundles`), and backs the file
-up first. It installs **no skill**: this is a permission layer, and a skill-catalogue entry
-would add context the model does not need.
+Control/help/profile-only calls no longer depend on a hidden default space:
 
-Useful flags:
+```js
+console.log(await profiles());
+help("taskSpace");
+```
+
+File-based official scripts work without scanning or rewriting:
+
+```js
+await import("file:///C:/automation/round-01.mjs");
+```
+
+Each call starts a new Node process; variables reset, spaces persist according to the official API. Ego usually prints console output to stderr; both streams are returned. Finish successful goals with `task.finish({ keep: [] })` by default, retaining only necessary result tabs. Follow official handoff/takeover/claim rules after user control. `timeoutMs` defaults to 240000, accepts 1–3600000, and truncated output is explicitly marked.
+
+## Optional managed snippets
+
+For legacy snippets such as `await page.goto(...)`, specify `mode: "managed"`. It injects task/page and reuses a session-named space:
+
+```json
+{
+  "description": "Open example page",
+  "mode": "managed",
+  "spaceName": "my-goal",
+  "script": "await page.goto('https://example.com'); console.log(task.spaceId);"
+}
+```
+
+Selection arguments (`spaceId`, `spaceName`, `profileId`) imply managed mode when mode is omitted. `spaceId` wins over the name. `profileId` is only for new spaces and cannot accompany `spaceId`. Official mode handles selection in the script and rejects those arguments.
+
+Managed mode never auto-claims user-owned spaces. After keeping tabs or handing off, official errors are preserved. Use official mode for control helpers and long workflows so each goal's lifecycle is explicit.
+
+## Profiles
+
+All official profile functionality is preserved:
+
+```js
+console.log(await profiles());
+const task = await taskSpace("requested-profile-goal", { profileId: "Profile 5" });
+const page = task.page("p1");
+// ...
+await task.finish({ keep: [] });
+```
+
+Use the ID requested by the user; profileId applies only to creation. Managed mode also accepts profileId. Ego supplies the list; this plugin does not hide/count profiles or guarantee their login state.
+
+## Official shell command
+
+A temporary shim is added to PATH and forwards to a loopback endpoint authenticated with a random secret. All CLI subcommands and script syntax are passed to the fixed Ego executable. Unknown commands fail in Ego itself. This transport permission does not automatically execute upgrades/imports; follow user authorization and the official skill.
+
+For PowerShell, use the official UTF-8 `.mjs` workflow:
 
 ```powershell
-pwsh -File scripts/install.ps1 -Profile tui      # non-default profile
-pwsh -File scripts/install.ps1 -DshHome C:\path  # non-default DSH home
+ego-browser nodejs -e "await import('file:///C:/automation/round-01.mjs')"
 ```
 
-```bash
-bash scripts/install.sh --profile tui
-bash scripts/install.sh --dsh-home /path/to/.dsh
-```
-
-### 3. Restart DeepSeek Harness
-
-The plugin loads at startup. After restarting, the `ego_browser` tool is available.
-
-### Verify
-
-Ask the Harness to run:
-
-```js
-await page.goto("https://example.com");
-console.log(JSON.stringify({ title: await page.title(), url: await page.url() }));
-```
-
-A JSON line with the page title in the result means the whole chain works: loader →
-executable discovery → unconfined spawn.
-
-## Zero context footprint
-
-The point of this plugin is to be **invisible to the model**. It installs no skill and adds
-no system-prompt text, so the model keeps following the official ego skill.
-
-To make that possible it also runs a **shell passthrough**: at startup it writes a tiny
-`ego-browser` shim, puts that directory on `PATH`, and serves a loopback endpoint. Inside a
-confined shell the official command now works verbatim:
-
-```bash
-ego-browser nodejs < script.mjs      # works under workspace-write
-```
-
-The shim forwards argv and stdin to the harness process, which runs the real binary and
-returns exit code plus both streams. If the proxy is unreachable it falls back to the real
-binary, so the command never becomes unusable.
-
-The passthrough still respects the browser/host split:
-
-| Through the shim | Behaviour |
-|---|---|
-| `nodejs` with a browser-only script, `skill`, `help`, `--version` | allowed |
-| `nodejs` with a script that imports `node:fs`, `child_process`, sockets, `eval`, … | **refused**, with a message pointing at the normal tools |
-| `upgrade`, `import` and any other subcommand | refused |
-
-Host work is meant to go through the ordinary `pwsh`/file tools, which apply the session
-sandbox and escalate through the approval policy — so the browser path stays the only
-unconfined channel, and only for browser work.
-
-Turn it off with `shellProxy: false` in the plugin config if you would rather keep the shell
-unmodified.
-
-## Usage
-
-The tool takes a `script` (the Node body handed to `ego-browser nodejs` on stdin) and a
-short `description`. `task` and a default `page` (`"p1"`) are already in scope, and
-top-level `await` works.
-
-```js
-await page.goto("https://xiumi.us");
-const info = await page.evaluate(() => ({
-  title: document.title,
-  links: [...document.querySelectorAll("a")].slice(0, 5).map((a) => a.innerText.trim()),
-}));
-console.log(JSON.stringify(info));
-```
-
-Options: `spaceId` to target a specific task space, `spaceName` for a deliberately separate
-goal, `timeoutMs` to cap the run.
-
-### Things worth knowing
-
-- **Ego prints script `console.log` output on STDERR, not stdout.** Both streams come back;
-  stderr is not failure.
-- **Each call is a new process; the task space is not.** The plugin keys the space name on
-  the session, so consecutive calls resume the same space automatically — you do not have to
-  print and thread `spaceId` by hand. Only JavaScript variables reset between calls.
-- **Prefer one script that finishes the whole flow.** Intermediate state never enters the
-  model's context, so batching is dramatically cheaper than many small calls.
-- **Do not call `task.finish()` with no argument or an empty `keep`** — both throw. Omit
-  `finish` (the space is released on process exit) or pass `task.finish({ keep: "all" })`.
-
-The full API guide ships with Ego Lite: run `ego-browser skill`. That command prints text
-only and works fine even under confinement.
-
-### API details that surprise people
-
-| Symptom | Cause |
-|---|---|
-| `page.screenshot received unknown option: saveAs` | the option is `path` |
-| `screenshot scale must be one of css` | `scale` is a string and only accepts `"css"` |
-| `loc=href:` matches nothing | it needs the **complete** URL — no substrings, no regex |
-| `matched 2 elements` | element actions require exactly one match; this is an error |
-| `page.fetch` fails on `file://` | it uses `window.fetch` and obeys browser CORS |
-
-## Security
-
-**The official browser surface is free.** Everything the ego skill documents — `task`, `page`
-and its methods, `console`, ordinary JavaScript — runs with no prompt. `node:path` is free
-too: it is pure string computation with no filesystem access.
-
-A script that reaches outside the browser is **refused, not prompted**: the filesystem,
-subprocess spawning, raw sockets, host OS/VM access, the process environment, or dynamic
-evaluation. You are never interrupted while using the browser. Comments are ignored during
-the scan, so documenting a module (`// uses node:fs`) does not trip it.
-
-That refusal is deliberate: host work belongs on the ordinary `pwsh` and file tools, where
-the session sandbox and its own approval policy already apply. If one flow needs both, split
-it — let the browser call save its artifact (`page.screenshot`, `download.saveAs`,
-`page.fetch` with `saveAs`), then process that artifact with the normal tools.
-
-Both channels behave this way: the tool refuses, and the shell passthrough refuses. Set
-`requireApproval: "ask"` if you would rather be asked once per offending call, or `"never"`
-to disable the check.
-
-The gate is a **consent mechanism, not a containment boundary**.
-
-`ego-browser nodejs` runs real Node.js with host permissions by design — the official skill
-says so explicitly. The gate scans the script text so it can catch the obvious cases, but a
-determined or obfuscated script can evade a text scan. Treat the refusal as a guard rail,
-not a guarantee.
-
-This is inherent to the approach, not a defect in the implementation: any route that gives
-the browser full capability gives the script that drives it the same reach. If you need real
-containment, the browser must run in a container, microVM, or other isolated environment —
-this plugin deliberately does not pretend otherwise.
-
-Set `requireApproval: "never"` in the plugin config to disable prompting entirely.
+The proxy offers no shell or caller-selected executable. If unavailable, the shim falls back to Ego and replays consumed stdin. That fallback may still be confined by DSH; restore the plugin or use the dedicated tool instead of changing other tools' permissions.
 
 ## Configuration
 
-The installer registers the plugin with defaults. To change them, edit the `ego-browser-cli`
-row in your profile's `cordis.patch.yml`:
-
 ```yaml
-- insert:
-    - id: ego-browser-cli
-      name: dsh-ego-browser-cli
-      config:
-        requireApproval: host-primitives   # or "never"
-        timeoutMs: 240000
-        # executable: /custom/path/ego-browser   # only for non-standard installs
+- id: ego-browser-cli
+  config:
+    timeoutMs: 240000
+    shellProxy: true
+    # executable: C:/custom/ego-browser.exe
+    # cwd: C:/automation
 ```
 
-`executable` is deliberately unset by default. The plugin resolves the binary itself:
+`requireApproval` was removed in 2.0. From 2.0.1, legacy block/ask/host-primitives settings stop mounting with a migration message so existing users do not silently expand trust. After reviewing the change, remove the legacy setting or explicitly set `trustedRuntime: true`. Fresh installations and the dedicated-browser configuration have no per-call plugin approval. `shellProxy: false` disables the shim while retaining the tool. No DSH core or global permission preset change is necessary.
 
-1. `executable` from config, if set
-2. the junction Ego Lite creates — `~/.local/share/ego/active_version_dir/ego-browser[.exe]`
-3. `ego-browser` on `PATH`
+The proxy requires a pre-resolved absolute executable and installs no shim if Ego cannot be found. Windows shim secrets use an explicit private DACL. Cancellation/timeout attempts process-tree termination and bounds output-pipe cleanup so an exited CLI cannot hang completion indefinitely. This is not an OS Job Object: deliberately detached processes and Windows orphans whose parent has already exited are not guaranteed to be reclaimed.
 
-Because `active_version_dir` is a junction that Ego Lite's own updater retargets, an
-upgrade keeps working without editing config. This also means the same config works on a
-different machine with a different username.
-
-## Compatibility
-
-- **Tested on Windows** (Ego Lite 0.6.1.13, Chromium 156, Node v24.22.1).
-- **macOS and Linux paths are supported but untested.** The resolver covers
-  `~/.local/bin/ego-browser` and `/Applications/ego lite.app/Contents/MacOS/ego-browser`.
-  Reports welcome.
-- Ego upgrades: the junction is retargeted in place, so the plugin survives version bumps.
-  If Ego Lite ever changes that mechanism, the `PATH` fallback still applies.
-
-## Tests
-
-```bash
-node test/mount.test.mjs        # registration shape, gate decisions, render, arg validation
-node test/portability.test.mjs  # executable resolution, upgrade resilience, missing-ego errors
-```
-
-`portability.test.mjs` runs a real browser flow, so Ego Lite must be installed. Note that
-`spawn` with piped stdio returns `EPERM` inside the confined shell — run the tests from a
-normal terminal, not through a sandboxed `pwsh` tool call.
-
-## Uninstall
+## Tests and compatibility
 
 ```powershell
-# Windows
-pwsh -File scripts/install.ps1 -h    # prints usage; rollback path is printed by the installer
+npm test          # no Ego required: mount, source, space and proxy regression tests
+npm run test:live # requires Ego: synthetic page/files/screenshots/upload/download
 ```
 
-Manual rollback: restore the `package.json.bak.*` backup the installer printed, delete
-`<profile>/node_modules/dsh-ego-browser-cli`, and restart. Nothing else is written outside
-the profile: the shim lives in the OS temp directory and is removed when the plugin unloads.
+Live tests use synthetic data, close their own spaces and write to a temporary test directory. Tests spawning children may encounter EPERM under confined shells; run development tests in a normal terminal. The installed tool executes from the plugin host. Windows has live verification; macOS/Linux paths have automated coverage but no native Ego smoke test yet.
 
-## License
+## Migration / rollback
 
-MIT
+2.0 intentionally changes the default script contract to official syntax. Add `mode: "managed"` to old short snippets. To roll back, restore the previous plugin payload and profile package metadata, then restart. To uninstall, remove the profile bundle registration; normal unload removes its temporary shim.

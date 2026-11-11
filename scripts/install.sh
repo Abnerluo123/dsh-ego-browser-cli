@@ -1,47 +1,29 @@
 #!/usr/bin/env bash
 # dsh-ego-browser-cli installer for macOS and Linux.
-#
-# Installs the plugin into a DSH profile and wires it into that profile's
-# package.json (both `dependencies` and `dsh.profile.bundles`). Idempotent.
-#
-# Usage:
-#   bash install.sh                          # default profile: desktop
-#   bash install.sh --profile tui            # another profile
-#   bash install.sh --dsh-home /path/to/.dsh # non-default DSH home
-#
-# Installs no skill on purpose: this is a permission layer, and a skill entry
-# would add context the model does not need.
-#
-# Never uses sudo. Fails loudly instead of guessing a path.
-
+# Usage: bash install.sh [--profile desktop] [--dsh-home /path/to/.dsh]
+# Never uses sudo. Successful upgrades retain the previous payload and manifest.
 set -euo pipefail
 
 PROFILE="desktop"
 DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
-SKILL_DIR=""
-INSTALL_SKILL=0
-
 while [ $# -gt 0 ]; do
   case "$1" in
-    --profile)    PROFILE="$2"; shift 2 ;;
-    --dsh-home)   DSH_HOME_DIR="$2"; shift 2 ;;
-    --skill-dir)  SKILL_DIR="$2"; shift 2 ;;
-    --no-skill)   INSTALL_SKILL=0; shift ;;
-    -h|--help)    sed -n '2,14p' "$0"; exit 0 ;;
-    *) echo "unknown option: $1" >&2; exit 1 ;;
+    --profile|--dsh-home|--skill-dir)
+      [ $# -ge 2 ] || { printf 'missing value for %s\n' "$1" >&2; exit 1; }
+      case "$1" in
+        --profile) PROFILE="$2" ;;
+        --dsh-home) DSH_HOME_DIR="$2" ;;
+        --skill-dir) : ;; # Retained for compatibility; this plugin installs no skill.
+      esac
+      shift 2 ;;
+    --no-skill) shift ;;
+    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    *) printf 'unknown option: %s\n' "$1" >&2; exit 1 ;;
   esac
 done
 
-step() { printf '  %s\n' "$1"; }
-fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
-
-printf 'dsh-ego-browser-cli installer\n\n'
-
-SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-[ -f "$SOURCE/index.js" ] || fail "index.js not found at $SOURCE"
-
-# Locate Node. It edits package.json, so it must be present; DSH ships one, but
-# it is not always on PATH (for example inside a minimal shell).
+SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "$SOURCE/index.js" ]; then SOURCE="$(cd "$SOURCE/.." && pwd)"; fi
 NODE=""
 for candidate in node \
   "$DSH_HOME_DIR/../dsh-runtimes/dsh-primary-runtime/dependencies/node/bin/node" \
@@ -49,81 +31,98 @@ for candidate in node \
   if command -v "$candidate" >/dev/null 2>&1; then NODE="$(command -v "$candidate")"; break; fi
   if [ -x "$candidate" ]; then NODE="$candidate"; break; fi
 done
-[ -n "$NODE" ] || fail "node not found on PATH. Install Node.js 22+ (or add DSH's bundled node to PATH) and retry."
-step "node: $NODE"
+[ -n "$NODE" ] || { echo 'ERROR: node not found. Add Node.js 22+ to PATH and retry.' >&2; exit 1; }
 
-PROFILE_DIR="$DSH_HOME_DIR/profiles/$PROFILE"
-if [ ! -d "$PROFILE_DIR" ]; then
-  AVAILABLE="(none)"
-  [ -d "$DSH_HOME_DIR/profiles" ] && AVAILABLE="$(ls -1 "$DSH_HOME_DIR/profiles" 2>/dev/null | tr '\n' ' ')"
-  fail "profile '$PROFILE' not found at $PROFILE_DIR. Available: $AVAILABLE"
-fi
-step "profile: $PROFILE_DIR"
+"$NODE" --input-type=module - "$SOURCE" "$DSH_HOME_DIR" "$PROFILE" <<'NODE_INSTALL'
+import * as fs from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+const [source, dshHome, profile] = process.argv.slice(2);
+const name = 'dsh-ego-browser-cli';
+const files = ['index.js', 'proxy.js', 'package.json', 'cordis.patch.yml', 'LICENSE'];
+const profileDir = path.join(dshHome, 'profiles', profile);
+const manifest = path.join(profileDir, 'package.json');
+const modules = path.join(profileDir, 'node_modules');
+const target = path.join(modules, name);
+let stage, backup;
+let oldPayloadMoved = false, oldManifestMoved = false;
+let newPayloadMoved = false, newManifestMoved = false;
+const object = (value, label) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a JSON object`);
+  return value;
+};
+try {
+  // Validate the full runtime payload and manifest before touching the install.
+  for (const file of files) {
+    if (!fs.statSync(path.join(source, file)).isFile()) throw new Error(`required source payload missing: ${file}`);
+  }
+  const sourcePkg = object(JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')), 'source package.json');
+  if (sourcePkg.name !== name) throw new Error('unexpected source package name');
+  const pkg = object(JSON.parse(fs.readFileSync(manifest, 'utf8')), 'profile package.json');
+  pkg.dependencies = object(pkg.dependencies ?? {}, 'dependencies');
+  pkg.dsh = object(pkg.dsh ?? {}, 'dsh');
+  pkg.dsh.profile = object(pkg.dsh.profile ?? {}, 'dsh.profile');
+  const bundles = pkg.dsh.profile.bundles ?? [];
+  if (!Array.isArray(bundles)) throw new Error('dsh.profile.bundles must be a JSON array');
+  if (!bundles.includes(name)) bundles.push(name);
+  pkg.dsh.profile.bundles = bundles;
+  pkg.dependencies[name] = 'file:' + target.replace(/\\/g, '/');
+  const json = JSON.stringify(pkg, null, 2) + '\n';
+  if (fs.existsSync(target) && !fs.statSync(target).isDirectory()) throw new Error(`payload target must be a directory: ${target}`);
 
-TARGET="$PROFILE_DIR/node_modules/dsh-ego-browser-cli"
-mkdir -p "$TARGET"
-for f in index.js proxy.js package.json cordis.patch.yml LICENSE; do
-  [ -f "$SOURCE/$f" ] && cp -f "$SOURCE/$f" "$TARGET/$f"
-done
-step "installed plugin files -> $TARGET"
-
-PKG="$PROFILE_DIR/package.json"
-[ -f "$PKG" ] || fail "profile package.json not found: $PKG"
-# Rendered new package.json; written only when it differs from the current one.
-BACKUP=""
-NEW_PKG="$PKG.new.$$"
-
-# Rewrite package.json with node (no jq dependency).
-"$NODE" --input-type=module -e '
-import { readFileSync, writeFileSync } from "node:fs";
-const [pkgPath, outPath, target] = process.argv.slice(1);
-const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-pkg.dependencies ??= {};
-pkg.dependencies["dsh-ego-browser-cli"] = "file:" + target.replace(/\\/g, "/");
-pkg.dsh ??= {};
-pkg.dsh.profile ??= {};
-pkg.dsh.profile.bundles ??= [];
-if (!pkg.dsh.profile.bundles.includes("dsh-ego-browser-cli")) {
-  pkg.dsh.profile.bundles.push("dsh-ego-browser-cli");
+  const id = randomUUID();
+  stage = path.join(profileDir, `.${name}.stage.${id}`);
+  backup = path.join(profileDir, `.${name}.backup.${id}`);
+  const stagedPayload = path.join(stage, 'payload');
+  fs.mkdirSync(stagedPayload, { recursive: true });
+  for (const file of files) fs.copyFileSync(path.join(source, file), path.join(stagedPayload, file));
+  fs.writeFileSync(path.join(stage, 'package.json'), json);
+  fs.mkdirSync(modules, { recursive: true });
+  fs.mkdirSync(backup);
+  // Same-filesystem moves with rollback for caught errors. Swapping these two
+  // paths is not atomic across an OS crash or power loss.
+  if (fs.existsSync(target)) {
+    fs.renameSync(target, path.join(backup, 'payload'));
+    oldPayloadMoved = true;
+  }
+  fs.renameSync(manifest, path.join(backup, 'package.json'));
+  oldManifestMoved = true;
+  fs.renameSync(stagedPayload, target);
+  newPayloadMoved = true;
+  fs.renameSync(path.join(stage, 'package.json'), manifest);
+  newManifestMoved = true;
+  console.log(`Installed plugin files -> ${target}`);
+  console.log(`Registered bundle and dependency in ${manifest}`);
+  console.log(`Previous manifest and payload (when present): ${backup}`);
+  console.log('No skill installed (permission-only plugin).');
+  console.log(`For manual rollback, restore package.json and payload from ${backup}.`);
+} catch (error) {
+  try {
+    if (newManifestMoved) fs.rmSync(manifest);
+    if (newPayloadMoved) fs.rmSync(target, { recursive: true });
+    if (oldManifestMoved) fs.renameSync(path.join(backup, 'package.json'), manifest);
+    if (oldPayloadMoved) fs.renameSync(path.join(backup, 'payload'), target);
+  } catch (rollbackError) {
+    console.error(`ERROR: rollback failed: ${rollbackError.message}. Recovery files: ${backup}`);
+  }
+  console.error(`ERROR: ${error.message}`);
+  process.exitCode = 1;
+} finally {
+  if (stage) {
+    try { fs.rmSync(stage, { recursive: true, force: true }); }
+    catch { console.error(`WARNING: could not remove staging directory: ${stage}`); }
+  }
 }
-writeFileSync(outPath, JSON.stringify(pkg, null, 2) + "\n");
-' "$PKG" "$NEW_PKG" "$TARGET"
+NODE_INSTALL
 
-if cmp -s "$PKG" "$NEW_PKG"; then
-  rm -f "$NEW_PKG"
-  step "package.json already up to date"
-else
-  BACKUP="$PKG.bak.$(date +%Y%m%d%H%M%S)"
-  cp -f "$PKG" "$BACKUP"
-  mv -f "$NEW_PKG" "$PKG"
-  step "package.json updated (backup: $(basename "$BACKUP"))"
-fi
-
-if [ "$INSTALL_SKILL" -eq 1 ]; then
-  # This plugin deliberately installs NO skill: it is a permission layer, and a
-  # skill catalogue entry would add context the model does not need. The official
-  # ego-browser skill already documents the API.
-  step "no skill installed (permission-only plugin)"
-fi
-
-echo ""
 if command -v ego-browser >/dev/null 2>&1; then
-  step "ego-browser found: $(command -v ego-browser)"
+  printf '  ego-browser found: %s\n' "$(command -v ego-browser)"
 elif [ -x "$HOME/.local/bin/ego-browser" ]; then
-  step "ego-browser found: $HOME/.local/bin/ego-browser"
+  printf '  ego-browser found: %s\n' "$HOME/.local/bin/ego-browser"
 else
-  echo "NOTE: ego-browser was not found on this machine."
-  echo "      Install Ego Lite from https://lite.ego.app/ and finish its onboarding."
-  echo "      The plugin resolves it at startup, so finish that first."
+  echo 'NOTE: ego-browser was not found on this machine.'
+  echo '      Install Ego Lite from https://lite.ego.app/ and finish its onboarding.'
+  echo '      The plugin resolves it at startup, so finish that first.'
 fi
-
-echo ""
-echo "Done. Restart DeepSeek Harness to load the plugin."
+echo 'Done. Restart DeepSeek Harness to load the plugin.'
 echo "After restart, the 'ego_browser' tool becomes available."
-echo ""
-if [ -n "$BACKUP" ]; then
-  echo "Rollback: restore $BACKUP over package.json, delete $TARGET, then restart."
-else
-  echo "Rollback: delete $TARGET and remove the dsh-ego-browser-cli entry from"
-  echo "          $PKG, then restart."
-fi

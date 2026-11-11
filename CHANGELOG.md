@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.0.1 — 2026-11-11
+
+- Resolve only absolute executable paths before exposing a shim. Skip generated proxy directories and leave the shim disabled when Ego is missing, avoiding self-recursion.
+- Protect Windows shim directories with a private DACL, not only POSIX file modes.
+- Bound completion when exited children leave inherited pipes open; attempt process-group/tree cleanup even after direct-child exit. Document detached/orphan cleanup limitations.
+- Validate and stage installer payload/manifests before replacement, back up prior payloads and restore them on caught commit failures. Serialize only the intended profile metadata; unrelated bundles remain untouched. This is error rollback, not crash-atomic installation.
+- Require explicit migration for legacy restrictive approval configuration; fresh dedicated Ego setups remain fully prompt-free.
+
+## 2.0.0 — 2026-11-11
+
+Dedicated trusted Ego automation lane, with official scripts passed unchanged.
+
+- Remove source scanning, approval hooks and CLI subcommand filtering. Only the fixed Ego executable is exposed; other DSH tools and global permission settings are untouched.
+- Default to official script mode: no injected declarations or eager task space. Optional managed mode retains short snippets and adds profileId for new spaces. This is a breaking script-contract change; add mode: managed to old snippets.
+- Correct finish guidance: keep: [] is supported. Official helpers remain available after handoff or retained-page completion, without auto-claiming user spaces.
+- Harden proxy request validation, spawn errors, cancellation, temporary directory and PATH cleanup. Replay consumed stdin on direct fallback and fix POSIX PATH delimiters.
+- Report output truncation and per-call timeouts; bound execution time and handle pre-cancelled calls.
+- Separate browser-free regression tests from optional real Ego tests; remove machine-specific executable paths from live tests.
+- Document the trust scope: Ego scripts have official host Node capabilities. This is a routing permission layer, not a sandbox within Ego.
+
 ## 1.2.0 — 2026-10-28
 
 Stop asking. The browser surface is free; anything else is refused instead of prompting.
